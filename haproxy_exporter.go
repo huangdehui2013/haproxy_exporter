@@ -8,7 +8,6 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -79,44 +78,6 @@ type Exporter struct {
 
 // NewExporter returns an initialized Exporter.
 func NewExporter(uri string, haProxyServerMetricFields string) *Exporter {
-	serverMetrics := map[int]*prometheus.GaugeVec{}
-
-	serverMetricFields := make(map[int]bool)
-	if haProxyServerMetricFields != "" {
-		for _, f := range strings.Split(haProxyServerMetricFields, ",") {
-			field, err := strconv.Atoi(f)
-			if err != nil {
-				log.Fatalf("Invalid field number: %v", f)
-			}
-			serverMetricFields[field] = true
-		}
-	}
-
-	for index, metric := range map[int]*prometheus.GaugeVec{
-		4:  newServerMetric("current_sessions", "Current number of active sessions.", nil),
-		5:  newServerMetric("max_sessions", "Maximum number of active sessions.", nil),
-		7:  newServerMetric("connections_total", "Total number of connections.", nil),
-		8:  newServerMetric("bytes_in_total", "Current total of incoming bytes.", nil),
-		9:  newServerMetric("bytes_out_total", "Current total of outgoing bytes.", nil),
-		13: newServerMetric("connection_errors_total", "Total of connection errors.", nil),
-		14: newServerMetric("response_errors_total", "Total of response errors.", nil),
-		15: newServerMetric("retry_warnings_total", "Total of retry warnings.", nil),
-		16: newServerMetric("redispatch_warnings_total", "Total of redispatch warnings.", nil),
-		17: newServerMetric("up", "Current health status of the server (1 = UP, 0 = DOWN).", nil),
-		33: newServerMetric("current_session_rate", "Current number of sessions per second over last elapsed second.", nil),
-		35: newServerMetric("max_session_rate", "Maximum number of sessions per second.", nil),
-		39: newServerMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "1xx"}),
-		40: newServerMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "2xx"}),
-		41: newServerMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "3xx"}),
-		42: newServerMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "4xx"}),
-		43: newServerMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "5xx"}),
-		44: newServerMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "other"}),
-	} {
-		if len(serverMetricFields) == 0 || serverMetricFields[index] {
-			serverMetrics[index] = metric
-		}
-	}
-
 	return &Exporter{
 		URI: uri,
 		up: prometheus.NewGauge(prometheus.GaugeOpts{
@@ -134,24 +95,6 @@ func NewExporter(uri string, haProxyServerMetricFields string) *Exporter {
 			Name:      "exporter_csv_parse_failures",
 			Help:      "Number of errors while parsing CSV.",
 		}),
-		frontendMetrics: map[int]*prometheus.GaugeVec{
-			4:  newFrontendMetric("current_sessions", "Current number of active sessions.", nil),
-			5:  newFrontendMetric("max_sessions", "Maximum number of active sessions.", nil),
-			7:  newFrontendMetric("connections_total", "Total number of connections.", nil),
-			8:  newFrontendMetric("bytes_in_total", "Current total of incoming bytes.", nil),
-			9:  newFrontendMetric("bytes_out_total", "Current total of outgoing bytes.", nil),
-			10: newFrontendMetric("requests_denied_total", "Total of requests denied for security.", nil),
-			12: newBackendMetric("request_errors_total", "Total of request errors.", nil),
-			33: newFrontendMetric("current_session_rate", "Current number of sessions per second over last elapsed second.", nil),
-			35: newFrontendMetric("max_session_rate", "Maximum number of sessions per second.", nil),
-			39: newFrontendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "1xx"}),
-			40: newFrontendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "2xx"}),
-			41: newFrontendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "3xx"}),
-			42: newFrontendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "4xx"}),
-			43: newFrontendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "5xx"}),
-			44: newFrontendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "other"}),
-			48: newFrontendMetric("http_requests_total", "Total HTTP requests.", nil),
-		},
 		backendMetrics: map[int]*prometheus.GaugeVec{
 			2:  newBackendMetric("current_queue", "Current server queue length.", nil),
 			3:  newBackendMetric("max_queue", "Maximum server queue length.", nil),
@@ -174,20 +117,13 @@ func NewExporter(uri string, haProxyServerMetricFields string) *Exporter {
 			43: newBackendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "5xx"}),
 			44: newBackendMetric("http_responses_total", "Total of HTTP responses.", prometheus.Labels{"code": "other"}),
 		},
-		serverMetrics: serverMetrics,
 	}
 }
 
 // Describe describes all the metrics ever exported by the HAProxy exporter. It
 // implements prometheus.Collector.
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
-	for _, m := range e.frontendMetrics {
-		m.Describe(ch)
-	}
 	for _, m := range e.backendMetrics {
-		m.Describe(ch)
-	}
-	for _, m := range e.serverMetrics {
 		m.Describe(ch)
 	}
 	ch <- e.up.Desc()
@@ -248,25 +184,13 @@ func (e *Exporter) scrape(csvRows chan<- []string) {
 }
 
 func (e *Exporter) resetMetrics() {
-	for _, m := range e.frontendMetrics {
-		m.Reset()
-	}
 	for _, m := range e.backendMetrics {
-		m.Reset()
-	}
-	for _, m := range e.serverMetrics {
 		m.Reset()
 	}
 }
 
 func (e *Exporter) collectMetrics(metrics chan<- prometheus.Metric) {
-	for _, m := range e.frontendMetrics {
-		m.Collect(metrics)
-	}
 	for _, m := range e.backendMetrics {
-		m.Collect(metrics)
-	}
-	for _, m := range e.serverMetrics {
 		m.Collect(metrics)
 	}
 }
@@ -279,7 +203,7 @@ func (e *Exporter) setMetrics(csvRows <-chan []string) {
 			continue
 		}
 
-		pxname, svname, type_ := csvRow[0], csvRow[1], csvRow[32]
+		pxname, _, type_ := csvRow[0], csvRow[1], csvRow[32]
 
 		const (
 			frontend = "0"
@@ -289,12 +213,8 @@ func (e *Exporter) setMetrics(csvRows <-chan []string) {
 		)
 
 		switch type_ {
-		case frontend:
-			e.exportCsvFields(e.frontendMetrics, csvRow, pxname)
 		case backend:
 			e.exportCsvFields(e.backendMetrics, csvRow, pxname)
-		case server:
-			e.exportCsvFields(e.serverMetrics, csvRow, pxname, svname)
 		}
 
 	}
